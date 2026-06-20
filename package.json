@@ -1,0 +1,27 @@
+{
+  "name": "mcp-weather",
+  "version": "1.0.0",
+  "description": "Korean weather + air quality MCP server (KMA short-term forecast + AirKorea PM) over stdio.",
+  "type": "module",
+  "bin": { "mcp-weather": "dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node --test",
+    "example": "node examples/weather-example.mjs"
+  },
+  "keywords": ["mcp", "weather", "kma", "airkorea", "model-context-protocol"],
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "proj4": "^2.11.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/proj4": "^2.5.5",
+    "typescript": "^5.5.0"
+  }
+}
