@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dfs_xy_conv, selectBaseDateTime, gradePm } from "../dist/kma.js";
+import { dfs_xy_conv, selectBaseDateTime, gradePm, bucketize } from "../dist/kma.js";
 
 test("dfs_xy_conv 서울(37.5665,126.9780) → nx 60, ny 127 (KMA 공식 레퍼런스)", () => {
   const { nx, ny } = dfs_xy_conv(37.5665, 126.978);
@@ -33,4 +33,26 @@ test("gradePm 등급 경계", () => {
   assert.equal(gradePm("PM25", 15), "좋음");
   assert.equal(gradePm("PM25", 36), "나쁨");
   assert.equal(gradePm("PM25", 76), "매우나쁨");
+});
+
+test("bucketize 아침06-09 / 점심12-15 / 저녁18-21 집계", () => {
+  const items = [
+    { category: "TMP", fcstTime: "0600", fcstValue: "18" },
+    { category: "TMP", fcstTime: "0900", fcstValue: "21" },
+    { category: "SKY", fcstTime: "0600", fcstValue: "3" },
+    { category: "PTY", fcstTime: "0600", fcstValue: "0" },
+    { category: "POP", fcstTime: "0600", fcstValue: "30" },
+    { category: "POP", fcstTime: "0900", fcstValue: "20" },
+    { category: "TMP", fcstTime: "1200", fcstValue: "24" },
+    { category: "SKY", fcstTime: "1200", fcstValue: "1" },
+    { category: "PTY", fcstTime: "1200", fcstValue: "0" },
+    { category: "POP", fcstTime: "1200", fcstValue: "10" },
+  ];
+  const b = bucketize(items);
+  assert.equal(b.morning.tempMin, 18);
+  assert.equal(b.morning.tempMax, 21);
+  assert.equal(b.morning.pop, 30); // 구간 최대
+  assert.equal(b.morning.sky, "구름많음");
+  assert.equal(b.noon.sky, "맑음");
+  assert.equal(b.noon.tempMax, 24);
 });

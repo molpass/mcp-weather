@@ -63,3 +63,67 @@ export function gradePm(kind: "PM10" | "PM25", value: number): string {
   if (value <= t[2]) return "나쁨";
   return "매우나쁨";
 }
+
+export interface FcstItem { category: string; fcstTime: string; fcstValue: string }
+export interface Bucket { tempMin: number | null; tempMax: number | null; sky: string; pop: number | null }
+export interface Buckets { morning: Bucket; noon: Bucket; evening: Bucket }
+
+const WINDOWS: Record<keyof Buckets, string[]> = {
+  morning: ["0600", "0700", "0800", "0900"],
+  noon: ["1200", "1300", "1400", "1500"],
+  evening: ["1800", "1900", "2000", "2100"],
+};
+
+// SKY(1맑음/3구름많음/4흐림) + PTY(0없음/1비/2비눈/3눈/4소나기) → 한글 라벨
+function skyLabel(sky?: string, pty?: string): string {
+  const p = pty ?? "0";
+  if (p !== "0") {
+    return ({ "1": "비", "2": "비/눈", "3": "눈", "4": "소나기" } as Record<string, string>)[p] ?? "강수";
+  }
+  return ({ "1": "맑음", "3": "구름많음", "4": "흐림" } as Record<string, string>)[sky ?? ""] ?? "정보없음";
+}
+
+function pickWindow(items: FcstItem[], times: string[]): Bucket {
+  const inWin = items.filter((it) => times.includes(it.fcstTime));
+  const temps = inWin.filter((i) => i.category === "TMP").map((i) => Number(i.fcstValue)).filter((n) => !Number.isNaN(n));
+  const pops = inWin.filter((i) => i.category === "POP").map((i) => Number(i.fcstValue)).filter((n) => !Number.isNaN(n));
+  const firstSky = inWin.find((i) => i.category === "SKY")?.fcstValue;
+  const anyPty = inWin.find((i) => i.category === "PTY" && i.fcstValue !== "0")?.fcstValue
+    ?? inWin.find((i) => i.category === "PTY")?.fcstValue;
+  return {
+    tempMin: temps.length ? Math.min(...temps) : null,
+    tempMax: temps.length ? Math.max(...temps) : null,
+    sky: skyLabel(firstSky, anyPty),
+    pop: pops.length ? Math.max(...pops) : null,
+  };
+}
+
+export function bucketize(items: FcstItem[]): Buckets {
+  return {
+    morning: pickWindow(items, WINDOWS.morning),
+    noon: pickWindow(items, WINDOWS.noon),
+    evening: pickWindow(items, WINDOWS.evening),
+  };
+}
+
+export async function fetchForecast(serviceKey: string, lat: number, lon: number, now: Date): Promise<Buckets> {
+  const { nx, ny } = dfs_xy_conv(lat, lon);
+  const { base_date, base_time } = selectBaseDateTime(now);
+  const url = new URL("https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst");
+  url.searchParams.set("serviceKey", serviceKey);
+  url.searchParams.set("pageNo", "1");
+  url.searchParams.set("numOfRows", "1000");
+  url.searchParams.set("dataType", "JSON");
+  url.searchParams.set("base_date", base_date);
+  url.searchParams.set("base_time", base_time);
+  url.searchParams.set("nx", String(nx));
+  url.searchParams.set("ny", String(ny));
+  const res = await fetch(url);
+  const text = await res.text();
+  if (text.includes("SERVICE_KEY") || text.includes("SERVICE ERROR"))
+    throw new Error(`KMA serviceKey 오류(발급 직후면 동기화 ~1시간 대기 후 재시도): ${text.slice(0, 200)}`);
+  let json: any;
+  try { json = JSON.parse(text); } catch { throw new Error(`KMA 응답 파싱 실패: ${text.slice(0, 200)}`); }
+  const items: FcstItem[] = json?.response?.body?.items?.item ?? [];
+  return bucketize(items);
+}
