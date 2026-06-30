@@ -106,7 +106,24 @@ export function bucketize(items: FcstItem[]): Buckets {
   };
 }
 
-export async function fetchForecast(serviceKey: string, lat: number, lon: number, now: Date): Promise<Buckets> {
+export interface FetchForecastOpts {
+  fetchImpl?: typeof fetch;            // 테스트 주입용 (기본 = 전역 fetch)
+  sleepImpl?: (ms: number) => Promise<void>;
+  retries?: number;                    // 재시도 횟수(최초 시도 제외). 기본 2 → 최대 3회 시도.
+  backoffMs?: number;                  // 재시도 간 대기. 기본 2500ms.
+}
+
+const _sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export async function fetchForecast(
+  serviceKey: string, lat: number, lon: number, now: Date,
+  opts: FetchForecastOpts = {},
+): Promise<Buckets> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const doSleep = opts.sleepImpl ?? _sleep;
+  const retries = opts.retries ?? 2;
+  const backoffMs = opts.backoffMs ?? 2500;
+
   const { nx, ny } = dfs_xy_conv(lat, lon);
   const { base_date, base_time } = selectBaseDateTime(now);
   const url = new URL("https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst");
@@ -118,12 +135,25 @@ export async function fetchForecast(serviceKey: string, lat: number, lon: number
   url.searchParams.set("base_time", base_time);
   url.searchParams.set("nx", String(nx));
   url.searchParams.set("ny", String(ny));
-  const res = await fetch(url);
-  const text = await res.text();
-  if (text.includes("SERVICE_KEY") || text.includes("SERVICE ERROR"))
-    throw new Error(`KMA serviceKey 오류(발급 직후면 동기화 ~1시간 대기 후 재시도): ${text.slice(0, 200)}`);
-  let json: any;
-  try { json = JSON.parse(text); } catch { throw new Error(`KMA 응답 파싱 실패: ${text.slice(0, 200)}`); }
-  const items: FcstItem[] = json?.response?.body?.items?.item ?? [];
-  return bucketize(items);
+
+  // 비-JSON 응답 바디(=data.go.kr 순간 rate limit 신호)면 백오프 후 재시도.
+  // serviceKey 오류는 재시도해도 무의미하므로 즉시 throw. 재시도 소진 시 기존 문구 유지.
+  let lastErr: Error = new Error("KMA 응답 파싱 실패");
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await doSleep(backoffMs);
+    const res = await doFetch(url);
+    const text = await res.text();
+    if (text.includes("SERVICE_KEY") || text.includes("SERVICE ERROR"))
+      throw new Error(`KMA serviceKey 오류(발급 직후면 동기화 ~1시간 대기 후 재시도): ${text.slice(0, 200)}`);
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      lastErr = new Error(`KMA 응답 파싱 실패: ${text.slice(0, 200)}`);
+      continue;
+    }
+    const items: FcstItem[] = json?.response?.body?.items?.item ?? [];
+    return bucketize(items);
+  }
+  throw lastErr;
 }
