@@ -9,6 +9,7 @@ const KMA_KEY = process.env.KMA_SERVICE_KEY ?? "";
 const AIR_KEY = process.env.AIRKOREA_SERVICE_KEY ?? KMA_KEY;
 
 function fmtBucket(label: string, b: Bucket): string {
+  if (b.past) return `${label} 지난 시간대`;
   const temp = b.tempMin == null ? "--" : b.tempMin === b.tempMax ? `${b.tempMin}°C` : `${b.tempMin}~${b.tempMax}°C`;
   const pop = b.pop == null ? "--" : `${b.pop}%`;
   return `${label} ${temp} · ${b.sky} · 강수 ${pop}`;
@@ -25,6 +26,8 @@ async function oneLocation(name: string, lat: number, lon: number, now: Date): P
     lines.push(fmtBucket("아침(06-09)", fc.value.morning));
     lines.push(fmtBucket("점심(12-15)", fc.value.noon));
     lines.push(fmtBucket("저녁(18-21)", fc.value.evening));
+    const { base_date: bd, base_time: bt } = fc.value;
+    lines.push(`(기상청 ${bd.slice(4, 6)}-${bd.slice(6)} ${bt.slice(0, 2)}:00 발표 기준)`);
   } else {
     lines.push(`날씨 조회 실패: ${fc.reason?.message ?? fc.reason}`);
   }
