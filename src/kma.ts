@@ -1,3 +1,5 @@
+import { gatewayError } from "./gateway.js";
+
 // KMA 단기예보 LCC 격자 변환 (기상청 공식 공식)
 export function dfs_xy_conv(lat: number, lon: number): { nx: number; ny: number } {
   const RE = 6371.00877, GRID = 5.0, SLAT1 = 30.0, SLAT2 = 60.0;
@@ -176,18 +178,20 @@ export async function fetchForecast(
       const res = await doFetch(url);
       const text = await res.text();
       // 게이트웨이 오류 XML 은 errMsg 에 늘 "SERVICE ERROR" 가 있으므로 코드로 먼저 가른다.
-      const gwCode = text.match(/<returnReasonCode>(\d+)<\/returnReasonCode>/)?.[1];
-      if (gwCode) {
-        lastErr = new Error(`KMA 오류 ${gwCode} ${text.match(/<returnAuthMsg>([^<]*)</)?.[1] ?? ""}`.trim());
-        if (RETRYABLE.has(gwCode)) continue;
+      // JSON 형식 게이트웨이 오류는 response.header 가 없어 아래에서 성공으로 읽히므로 여기서 가른다.
+      const gw = gatewayError(text);
+      if (gw) {
+        lastErr = new Error(`KMA 오류 ${gw.code} ${gw.msg}`.trim());
+        if (RETRYABLE.has(gw.code)) continue;
         throw lastErr;
       }
-      if (text.includes("SERVICE_KEY") || text.includes("SERVICE ERROR"))
-        throw new Error(`KMA serviceKey 오류(발급 직후면 동기화 ~1시간 대기 후 재시도): ${text.slice(0, 200)}`);
       let json: any;
       try {
         json = JSON.parse(text);
       } catch {
+        // 문자열 검사는 JSON 이 아닐 때만 한다. JSON 응답 헤더의 키 오류 메시지(SERVICE_KEY_…)는 아래에서 코드로 가른다.
+        if (text.includes("SERVICE_KEY") || text.includes("SERVICE ERROR"))
+          throw new Error(`KMA serviceKey 오류(발급 직후면 동기화 ~1시간 대기 후 재시도): ${text.slice(0, 200)}`);
         lastErr = new Error(`KMA 응답 파싱 실패: ${text.slice(0, 200)}`);
         continue;
       }

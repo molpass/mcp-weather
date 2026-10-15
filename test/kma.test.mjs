@@ -258,3 +258,33 @@ test("시간대 경계: 09시대까지는 아침이 지나지 않았고 10:00 �
   assert.equal(b1.morning.tempMin, 16);
   assert.equal(b2.morning.past, true);
 });
+
+// 공공데이터포털 게이트웨이는 dataType=JSON 요청에 오류를 JSON 으로도 준다(2026-10-15 에어코리아에서 측정).
+// 이 본문에는 response.header 가 없어서, 코드로 가르지 않으면 성공(빈 items)으로 처리된다.
+const gwJsonKma = (code, msg) => JSON.stringify({ OpenAPI_ServiceResponse: { cmmMsgHeader: { errMsg: msg, returnAuthMsg: "MSG", returnReasonCode: code } } });
+
+test("응답 헤더의 실제 키 오류 메시지(SERVICE_KEY_… 포함)도 'KMA 오류 30' 으로 코드를 남긴다", async () => {
+  const f = fetchByBase({ "1100": kmaBody("30", "SERVICE_KEY_IS_NOT_REGISTERED_ERROR") });
+  await assert.rejects(
+    fetchForecast("KEY", 37.394, 126.957, WHEN, { fetchImpl: f, sleepImpl: mkSleep(), retries: 2 }),
+    /KMA 오류 30 SERVICE_KEY_IS_NOT_REGISTERED_ERROR/,
+  );
+  assert.equal(f.calls.length, 1);
+});
+
+test("게이트웨이 JSON 05 는 '정보없음'이 아니라 일시 오류로 재시도한다", async () => {
+  const f = fetchByBase({ "1100": [gwJsonKma("05", "SERVICETIMEOUT_ERROR"), OK_TODAY] }), s = mkSleep();
+  const b = await fetchForecast("KEY", 37.394, 126.957, WHEN, { fetchImpl: f, sleepImpl: s, retries: 2 });
+  assert.equal(f.calls.length, 2);
+  assert.equal(s.count, 1);
+  assert.equal(b.noon.tempMin, 25);
+});
+
+test("게이트웨이 JSON 22 는 재시도하지 않고 'KMA 오류 22' 로 실패한다", async () => {
+  const f = fetchByBase({ "1100": gwJsonKma("22", "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR") });
+  await assert.rejects(
+    fetchForecast("KEY", 37.394, 126.957, WHEN, { fetchImpl: f, sleepImpl: mkSleep(), retries: 2 }),
+    /KMA 오류 22 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR/,
+  );
+  assert.equal(f.calls.length, 1);
+});

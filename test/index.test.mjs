@@ -31,6 +31,14 @@ test("get_weather: 기상청 실패 사유를 그 지역 결과에 담고, 미�
   assert.match(text, /미세먼지 PM10 20 \(좋음\)/);
 });
 
+test("get_weather: 미세먼지가 실패하면 사유를 남기고, 기상청 결과는 그대로 돌려준다", async () => {
+  const kma = { "1100": ok([{ category: "TMP", fcstDate: "20260620", fcstTime: "1300", fcstValue: "25" }]) };
+  const text = await getWeather({ STUB_NOW: NOW_13, STUB_KMA: JSON.stringify(kma), STUB_AIR_GW: "22" });
+  assert.match(text, /미세먼지 조회 실패: 에어코리아 오류 22 /);
+  assert.doesNotMatch(text, /근접 측정소 없음/);
+  assert.match(text, /점심\(12-15\) 25°C/);
+});
+
 test("get_weather: 지난 시간대는 '지난 시간대'로 쓰고, 실제로 쓴 발표 시각을 밝힌다", async () => {
   const kma = { "1100": NO_DATA_BODY, "0800": ok([
     { category: "TMP", fcstDate: "20260620", fcstTime: "1300", fcstValue: "25" },
